@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Secure Chat</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; height: 100vh; display: grid; grid-template-columns: 280px 1fr; }
+    header { grid-column: 1 / -1; padding: 12px 16px; background: #0f172a; color: #fff; font-weight: 600; }
+    #sidebar { border-right: 1px solid #e2e8f0; padding: 12px; overflow:auto }
+    #main { display: grid; grid-template-rows: 1fr auto; height: calc(100vh - 48px); }
+    #messages { padding: 16px; overflow:auto; background: #f8fafc }
+    #composer { border-top: 1px solid #e2e8f0; padding: 12px; display: flex; gap: 8px }
+    input, button, select { font: inherit }
+    .msg { max-width: 70%; margin: 6px 0; padding: 8px 10px; border-radius: 10px; }
+    .mine { background: #0ea5e9; color: white; margin-left: auto }
+    .theirs { background: #e2e8f0 }
+    .user { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+    .user.active { background: #e2e8f0 }
+    .presence { width: 8px; height: 8px; border-radius: 999px; display:inline-block; margin-right:6px }
+    .online { background: #22c55e }
+    .offline { background: #94a3b8 }
+  </style>
+</head>
+<body>
+  <header>Secure Chat</header>
+  <aside id="sidebar">
+    <div>
+      <input id="username" placeholder="username" />
+      <input id="password" type="password" placeholder="password" />
+      <button id="register">Register</button>
+      <button id="login">Login</button>
+    </div>
+    <hr />
+    <div>
+      <strong>Users</strong>
+      <div id="users"></div>
+    </div>
+  </aside>
+  <section id="main">
+    <div id="messages"></div>
+    <div id="composer">
+      <input id="input" placeholder="Type a message" style="flex:1" />
+      <button id="send">Send</button>
+    </div>
+  </section>
+
+  <script>
+    const API = location.origin.replace(/:\d+$/, ':8000')
+    let token = null
+    let me = null
+    let selectedUserId = null
+    let online = new Set()
+    let ws = null
+
+    async function api(path, options={}) {
+      options.headers = options.headers || {}
+      if (token) options.headers['Authorization'] = `Bearer ${token}`
+      if (options.body && !(options.body instanceof FormData)) {
+        options.headers['Content-Type'] = 'application/json'
+        options.body = JSON.stringify(options.body)
+      }
+      const res = await fetch(`${API}${path}`, options)
+      if (!res.ok) throw new Error(await res.text())
+      return res.json()
+    }
+
+    function renderUsers(users) {
+      const el = document.getElementById('users')
+      el.innerHTML = ''
+      users.forEach(u => {
+        const d = document.createElement('div')
+        d.className = 'user' + (u.id === selectedUserId ? ' active' : '')
+        const dot = document.createElement('span')
+        dot.className = 'presence ' + (online.has(u.id) ? 'online' : 'offline')
+        d.appendChild(dot)
+        d.appendChild(document.createTextNode(u.username))
+        d.onclick = () => selectUser(u.id)
+        el.appendChild(d)
+      })
+    }
+
+    function addMessage(m) {
+      const d = document.createElement('div')
+      d.className = 'msg ' + (m.sender_id === me.id ? 'mine' : 'theirs')
+      d.textContent = m.content
+      document.getElementById('messages').appendChild(d)
+      d.scrollIntoView({behavior:'smooth', block:'end'})
+    }
+
+    async function selectUser(userId) {
+      selectedUserId = userId
+      document.querySelectorAll('.user').forEach(x => x.classList.remove('active'))
+      renderUsers(await listUsers())
+      document.getElementById('messages').innerHTML = ''
+      const hist = await api(`/messages/${userId}`)
+      hist.messages.forEach(addMessage)
+    }
+
+    async function listUsers() {
+      const res = await api('/users')
+      return res
+    }
+
+    function connectWs() {
+      if (!token) return
+      if (ws) ws.close()
+      ws = new WebSocket(`${API.replace('http', 'ws')}/ws?token=${token}`)
+      ws.onmessage = ev => {
+        const {type, payload} = JSON.parse(ev.data)
+        if (type === 'message') {
+          if (payload.sender_id === selectedUserId || payload.recipient_id === selectedUserId) {
+            addMessage(payload)
+          }
+        } else if (type === 'presence') {
+          if (payload.online) online.add(payload.user_id); else online.delete(payload.user_id)
+          renderUsers(window._users || [])
+        }
+      }
+    }
+
+    document.getElementById('register').onclick = async () => {
+      await api('/auth/register', {method: 'POST', body: {username: username.value, password: password.value}})
+      alert('Registered! Now login.')
+    }
+    document.getElementById('login').onclick = async () => {
+      const form = new FormData()
+      form.append('username', username.value)
+      form.append('password', password.value)
+      const res = await fetch(`${API}/auth/login`, {method: 'POST', body: form})
+      const data = await res.json()
+      token = data.access_token
+      me = await api('/users/me')
+      window._users = await listUsers()
+      renderUsers(window._users)
+      connectWs()
+    }
+    document.getElementById('send').onclick = async () => {
+      if (!selectedUserId) return alert('Select a user from the list')
+      const m = await api('/messages', {method: 'POST', body: {recipient_id: selectedUserId, content: input.value}})
+      addMessage(m)
+      input.value = ''
+    }
+  </script>
+</body>
+</html>
+
