@@ -46,7 +46,7 @@
   </section>
 
   <script>
-    const API = location.origin.replace(/:\d+$/, ':8000')
+    const API = location.origin
     let token = null
     let me = null
     let selectedUserId = null
@@ -105,7 +105,8 @@
     function connectWs() {
       if (!token) return
       if (ws) ws.close()
-      ws = new WebSocket(`${API.replace('http', 'ws')}/ws?token=${token}`)
+      const wsProto = location.protocol === 'https:' ? 'wss' : 'ws'
+      ws = new WebSocket(`${wsProto}://${location.host}/ws?token=${token}`)
       ws.onmessage = ev => {
         const {type, payload} = JSON.parse(ev.data)
         if (type === 'message') {

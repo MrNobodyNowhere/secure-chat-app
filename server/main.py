@@ -5,6 +5,8 @@ from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 
 from .auth import authenticate_user, create_access_token, get_current_user, get_password_hash
 from .database import Base, engine, get_db
@@ -26,6 +28,14 @@ app.add_middleware(
 )
 
 app.include_router(public_router)
+
+# Serve frontend
+app.mount("/", StaticFiles(directory="frontend", html=True), name="static")
+
+
+@app.get("/")
+async def root_index():
+	return RedirectResponse(url="/index.html")
 
 
 @app.post("/auth/register", response_model=UserOut)
